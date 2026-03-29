@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       kernel_version:
-        description: 'Kernel version'
+        description: 'Kernel version (e.g., 6.1.y, 5.15.y)'
         required: true
         default: '6.1.y'
+      kernel_sign:
+        description: 'Kernel signature'
+        required: false
+        default: '-android'
 
 jobs:
   build:
@@ -26,10 +30,12 @@ jobs:
           wget -O compile-kernel/tools/config/stable/config-6.1 \
             https://github.com/ophub/kernel/raw/main/kernel-config/release/stable/config-6.1
           
-          # 添加完整 Android 支持（关键！）
+          # 添加完整 Android 支持（ASHMEM + BINDER）
           cat >> compile-kernel/tools/config/stable/config-6.1 << 'EOFCONFIG'
 
-# ===== Android Full Support =====
+# ============================================
+# Android Full Support (ASHMEM + BINDER)
+# ============================================
 CONFIG_ANDROID=y
 CONFIG_ASHMEM=y
 CONFIG_ANDROID_BINDER_IPC=y
@@ -39,10 +45,43 @@ CONFIG_ANDROID_LOW_MEMORY_KILLER=y
 CONFIG_ANDROID_LMKD=y
 CONFIG_ANDROID_PARANOID_NETWORK=y
 CONFIG_ANDROID_INTFS=y
+CONFIG_ANDROID_BINDER_IPC_SELFTEST=y
+CONFIG_ANDROID_PMEM=y
+
+# 必要的内核功能
+CONFIG_MEMCG=y
+CONFIG_MEMCG_SWAP=y
+CONFIG_MEMCG_KMEM=y
+CONFIG_CGROUPS=y
+CONFIG_CGROUP_SCHED=y
+CONFIG_CGROUP_FREEZER=y
+CONFIG_CGROUP_DEVICE=y
+CONFIG_CGROUP_CPUACCT=y
+CONFIG_NAMESPACES=y
+CONFIG_NET_NS=y
+CONFIG_PID_NS=y
+CONFIG_IPC_NS=y
+CONFIG_UTS_NS=y
+
+# 文件系统支持
+CONFIG_FUSE_FS=y
+CONFIG_OVERLAY_FS=y
+CONFIG_EXT4_FS=y
+CONFIG_TMPFS=y
+CONFIG_TMPFS_POSIX_ACL=y
+
+# 其他必要选项
+CONFIG_SECCOMP=y
+CONFIG_SECCOMP_FILTER=y
+CONFIG_PERF_EVENTS=y
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
 EOFCONFIG
           
           echo "✅ Android config added"
-          grep -E "ANDROID|ASHMEM|BINDER" compile-kernel/tools/config/stable/config-6.1 | head -n 10
+          echo ""
+          echo "=== 验证配置 ==="
+          grep -E "ANDROID|ASHMEM|BINDER" compile-kernel/tools/config/stable/config-6.1 | head -n 15
 
       - name: Compile the kernel
         uses: ophub/amlogic-s9xxx-armbian@main
@@ -51,15 +90,34 @@ EOFCONFIG
           kernel_source: unifreq
           kernel_version: ${{ github.event.inputs.kernel_version }}
           kernel_auto: true
-          kernel_sign: -android
+          kernel_sign: ${{ github.event.inputs.kernel_sign }}
           config_flavor: stable
           auto_patch: false
+          compress_format: xz
 
       - name: Upload kernel to Releases
         uses: softprops/action-gh-release@v1
         if: ${{ success() }}
         with:
-          tag_name: kernel-${{ env.PACKAGED_OUTPUTTAGS }}-android
+          tag_name: kernel-${{ env.PACKAGED_OUTPUTTAGS }}${{ github.event.inputs.kernel_sign }}
           files: ${{ env.PACKAGED_OUTPUTPATH }}/*.tar.gz
+          body: |
+            ## Android Kernel for Amlogic S905L3B
+            
+            **Kernel Version:** ${{ env.PACKAGED_OUTPUTTAGS }}
+            **Build Date:** ${{ env.PACKAGED_OUTPUTDATE }}
+            **Status:** ${{ env.PACKAGED_STATUS }}
+            
+            ### Features
+            - ✅ Ashmem support (CONFIG_ASHMEM=y)
+            - ✅ Binder IPC support (CONFIG_ANDROID_BINDER_IPC=y)
+            - ✅ Binderfs support (CONFIG_ANDROID_BINDERFS=y)
+            - ✅ Android LMKD support
+            - ✅ Waydroid/Anbox compatible
+            
+            ### Files
+            - boot-*.tar.gz: Kernel boot image
+            - dtb-*.tar.gz: Device tree blobs
+            - modules-*.tar.gz: Kernel modules
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
