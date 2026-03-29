@@ -1,0 +1,36 @@
+name: Compile Android Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: 'Kernel version'
+        required: true
+        default: '6.1.y'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Compile the kernel
+        uses: ophub/amlogic-s9xxx-armbian@main
+        with:
+          build_target: kernel
+          kernel_source: unifreq
+          kernel_version: ${{ github.event.inputs.kernel_version }}
+          kernel_auto: true
+          kernel_sign: -android
+          config_flavor: stable
+          auto_patch: false
+          
+      - name: Upload kernel to Releases
+        uses: softprops/action-gh-release@v1
+        if: ${{ success() }}
+        with:
+          tag_name: kernel-${{ env.PACKAGED_OUTPUTTAGS }}
+          files: ${{ env.PACKAGED_OUTPUTPATH }}/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
