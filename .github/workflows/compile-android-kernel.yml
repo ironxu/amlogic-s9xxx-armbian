@@ -1,0 +1,76 @@
+name: Compile Android Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: 'Kernel version (e.g., 6.1.y, 5.15.y)'
+        required: true
+        default: '6.1.y'
+      kernel_sign:
+        description: 'Kernel signature'
+        required: false
+        default: '-android'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Prepare kernel config
+        run: |
+          # 创建配置目录
+          mkdir -p compile-kernel/tools/config/stable
+          
+          # 下载基础配置
+          wget -O compile-kernel/tools/config/stable/config-6.1 \
+            https://github.com/ophub/kernel/raw/main/kernel-config/release/stable/config-6.1
+          
+          # 复制我们的 Android 配置
+          if [ -d "kernel-config/stable" ]; then
+            cat kernel-config/stable/config-6.1 >> compile-kernel/tools/config/stable/config-6.1
+            echo "✅ Android config added"
+          fi
+
+      - name: Compile the kernel
+        uses: ophub/amlogic-s9xxx-armbian@main
+        with:
+          build_target: kernel
+          kernel_source: unifreq
+          kernel_version: ${{ github.event.inputs.kernel_version }}
+          kernel_auto: true
+          kernel_sign: ${{ github.event.inputs.kernel_sign }}
+          config_flavor: stable
+          auto_patch: false
+          compress_format: xz
+
+      - name: Upload kernel to Releases
+        uses: softprops/action-gh-release@v1
+        if: ${{ success() }}
+        with:
+          tag_name: kernel-${{ env.PACKAGED_OUTPUTTAGS }}${{ github.event.inputs.kernel_sign }}
+          files: ${{ env.PACKAGED_OUTPUTPATH }}/*.tar.gz
+          body: |
+            ## Android Kernel for Amlogic S905L3B
+            
+            **Kernel Version:** ${{ env.PACKAGED_OUTPUTTAGS }}
+            **Build Date:** ${{ env.PACKAGED_OUTPUTDATE }}
+            **Status:** ${{ env.PACKAGED_STATUS }}
+            
+            ### Features
+            - ✅ Ashmem support
+            - ✅ Binder IPC support
+            - ✅ Android LMKD support
+            - ✅ Waydroid/Anbox compatible
+            
+            ### Files
+            - boot-*.tar.gz: Kernel boot image
+            - dtb-*.tar.gz: Device tree blobs
+            - modules-*.tar.gz: Kernel modules
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
